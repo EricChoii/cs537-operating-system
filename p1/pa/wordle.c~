@@ -1,0 +1,64 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_LEN 256 // a line does not exceed a length of 255
+
+/**
+ * Print an error message,then exit with status code 1
+ */
+void InvalidNumArg() {
+  printf("wordle: invalid number of args");
+  exit(1);
+}
+
+/**
+ * Main Function
+ */
+int main(int argc, char **argv) {
+  // passed invalid number of args
+  if (argc != 3)
+    InvalidNumArg();
+  
+  char line[MAX_LEN];
+  char* fn = argv[argc - 2]; // filename
+  char* t = argv[argc - 1]; // target
+
+  FILE *fp = fopen(fn, "r");
+  if (fp == NULL) {
+    // file not found
+    printf("wordle: cannot open file\n");
+    return 1;
+  }
+
+  // iterate the file and print out line(s)
+  // not including any target character
+  while (fgets(line, MAX_LEN, fp) != NULL) {
+    // end of file
+    if (line == NULL)
+      break;
+    // not five-letter word
+    if (strlen(line) - 1 != 5)
+      continue;
+
+    char c; // a target character
+    int i = 0; // target pointer
+    int flag = 0; // 1: skip (default), 0: print out
+    while ((c = *(t + i++)) != '\0') {      
+      if (strchr(line, c) != NULL) {
+	// if a target char resides in this line
+	flag = 1; // skip this line
+	break;
+      }
+    }
+
+    // if target not exist in this line,
+    // then print it out
+   if (!flag)
+      printf("%s", line);   
+  }
+
+  fclose(fp);
+
+  return 0;
+}
