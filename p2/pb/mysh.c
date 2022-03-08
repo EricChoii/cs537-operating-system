@@ -13,7 +13,7 @@
 #define TOKEN 100
 
 // STRUCT
-struct NODE *head; // Linked List
+struct NODE *head; 
 
 // EVENT HANDLER
 void INThandler(int); // Ctrl-C Event Handler
@@ -28,6 +28,8 @@ void FreeLinkedList(struct NODE *head) {
   if (head->next != NULL) {
     struct NODE *curr = head->next;
     while(curr !=NULL) {
+      int count = 0;
+      while (curr->tkns[count] != NULL) { free(curr->tkns[count++]); }
       struct NODE *next = curr->next;
       free(curr);
       curr = next;
@@ -78,12 +80,61 @@ size_t Trim(char *out, size_t len, const char *str)
 }
 
 /**
- * Extract tokens from command line
+ * Remove alias from linkedlist
+ * @param alias
+ */
+void removeAlias(char* alias)
+{
+  if (head == NULL)
+    return;
+  struct NODE *curr = head->next;
+  struct NODE *prev = head;
+  while (curr != NULL) {
+    if (!strcmp(curr->alias, alias)) {
+      removeFirst(prev);
+      return;
+    }
+    prev = prev->next;
+    curr = curr->next;	          
+  }
+  return;
+}
+
+/**
+ * Display all aliases
+ */
+void getAliases()
+{
+  if (head == NULL)
+    return;
+  struct NODE *curr = head->next;
+  while (curr != NULL) {
+    int count = 0;
+    char tokens[MAXLEN];
+    memset(tokens, 0, sizeof(tokens)); // reset
+    // concatenate alias and its tokens
+    strcat(tokens, curr->alias);
+    strcat(tokens, " ");
+    while (curr->tkns[count] != NULL) {      
+      if (count == 0)
+	strcat(tokens, curr->tkns[count]);
+      else
+	strcat(strcat(tokens, " "), curr->tkns[count]);
+      count++;
+    }
+    printf("%s\n", tokens);
+    fflush(stdout);
+    curr = curr->next;
+  }
+}
+
+/**
+ * Extract tokens from command line buffer
  * @param buf
  * @param tkns
  * @return 0: SUCCESS | 1: ERROR
  */
-int GetTokens(char* buf, char* tkns[MAXLEN]){
+int GetTokens(char* buf, char* tkns[TOKEN]){
   const char delimiters[] = " \t";
   char* args = strtok(buf, delimiters);
   int i = 0;
@@ -105,7 +156,7 @@ int GetTokens(char* buf, char* tkns[MAXLEN]){
  * @param tkns
  * @return 0: SUCCESS | 1: ERROR
  */
-int OutRedirect(char *tkns[TOKEN]){
+int OutRedirect(char* tkns[TOKEN]){
   int start = 0; // index of the first '>' in tokens
   int eflg = 0; // error flag
   int isRd = 0; // redirection check
@@ -190,7 +241,6 @@ int OutRedirect(char *tkns[TOKEN]){
 int Process(char* tkns[TOKEN], FILE* fp){
   pid_t pid;
   int pstat; // process status
-  
   pid = fork(); // new process space
   switch (pid) {
   case -1:
@@ -201,8 +251,12 @@ int Process(char* tkns[TOKEN], FILE* fp){
     // change file descriptor if necessary (1: ERROR)
     if (!OutRedirect(tkns)){    
       // execute command
-      if(execv(tkns[0], tkns) == -1)
-	Print(strcat(tkns[0], ": Command not found.\n"), STDERR_FILENO);            
+      if(execv(tkns[0], tkns) == -1){
+	char str[MAXLEN];
+	strcpy(str, tkns[0]);
+	strcat(str, ": Command not found.\n");
+	Print(str, STDERR_FILENO);
+      }
     }
     // free memory, then move to the next line   
     if (fp != NULL) 
@@ -217,35 +271,101 @@ int Process(char* tkns[TOKEN], FILE* fp){
 }
 
 /**
+ * Support alias/unalias services
+ * @param tkns
+ * @param type 0: unalias | 1: alias
+ */
+void AliasManager(char* tkns[TOKEN], int type)
+{
+  int tkns_size = 0;
+  char* inv_alias_names[10] = { "alias", "unalias", "exit" };
+  while (tkns[tkns_size] != NULL) { tkns_size++; }          
+  if (type) {
+    // alias
+    if (tkns_size == 1)
+      getAliases(); // display all aliases          
+    else {
+      int i = 0;
+      while (inv_alias_names[i] != NULL) {
+	if (!strcmp(tkns[1], inv_alias_names[i])) {	  
+	  // invalid alias names
+	  Print("alias: Too dangerous to alias that.\n", 2);
+	  return;
+	}
+	i++;
+      }
+      struct NODE* node = findNode(head, tkns[1]); // search alias
+      if (tkns_size == 2) {
+	// alias followed by a word
+	if (node != NULL) {
+	  // alias-name exists
+	  int count = 0;
+	  char tokens[MAXLEN];
+	  memset(tokens, 0, sizeof(tokens));
+	  strcat(tokens, node->alias);
+	  strcat(tokens, " ");
+	  while (node->tkns[count] != NULL) {
+	    if (count == 0)
+	      strcat(tokens, node->tkns[count]);
+	    else
+	      strcat(strcat(tokens, " "), node->tkns[count]);
+	    count++;
+	  }
+	  printf("%s\n", tokens);
+	  fflush(stdout);
+	}
+      }
+      else {
+	if (node != NULL) {
+	  // if alias already exist, then replace
+	  int count = 0;
+	  while (node->tkns[count] != NULL) { free(node->tkns[count]); node->tkns[count++] = 0; }
+	  count = 0;
+	  while (tkns[count+2] != NULL) {	   
+	    node->tkns[count] = malloc(strlen(tkns[count+2]) + 1);	    	  
+	    strcpy(node->tkns[count], tkns[count+2]);
+	    count++;
+	  }
+	}      
+	else
+	  addFirst(head, tkns[1], (tkns+2)); // add new alias	
+      }
+    }
+  } else {
+    // unalias
+    if (tkns_size != 2) {
+      Print("unalias: Incorrect number of arguments.\n", 1);
+      return;
+    }
+    removeAlias(tkns[1]);
+  }
+}
+
+/**
  * INTERACTIVE MODE:
  * Get user input and run it
  * @return 0: SUCCESS | 1: ERROR
  */
 int InterM() {
-  char buf[MAXLEN]; // store user command
-  char* tkns[TOKEN]; // shell command tokens
-
   // read user input
-  while(1){
+  while(1) {       
+    char* tkns[TOKEN]; // shell command tokens
+    char buf[MAXLEN]; // store user command  
     int buf_size = 0;
-    Print("mysh> ", 1);
-    memset(buf, 0x00, MAXLEN); // reset buffer
-
+    Print("mysh> ", 1);    
     // get user input
     if (fgets(buf, MAXLEN, stdin) == NULL)
-      break; // Ctrl+D                
+      break; // Ctrl+D      
     buf_size = strlen(buf) - 1;
-
     // if characters > 512, then skip
     if (buf_size > MAXLINE){
       Print("Error: Too Many Characters", 1);
       continue;
-    }
+    }      
     buf[buf_size] = 0x00; // remove '\n'    
     char tbuf[MAXLEN]; // trim buffer
     Trim(tbuf, MAXLEN, buf);
-    int tbuf_size = strlen(tbuf) - 1;
-
+    int tbuf_size = strlen(tbuf) - 1;   
     // new line only (i.e., " \n", "\n", "\t  \n  ")
     if (tbuf_size == 0 && tbuf[tbuf_size] == '\n')
       continue; // N/A    
@@ -255,7 +375,27 @@ int InterM() {
     // get tokens from buffer
     if (GetTokens(buf, tkns))
       return 1; // # tokens > TOKEN
-
+    if (tkns[0] == NULL)
+      continue; // empty string (i.e, "    ")
+    // alias manager    
+    int a = strcmp(tkns[0], "alias");    
+    if (a == 0 || !strcmp(tkns[0], "unalias")) {      
+      if (a == 0)
+	AliasManager(tkns, 1); // alias
+      else
+	AliasManager(tkns, 0); // unalias
+      continue;
+    }
+    // if alias, then replace tokens
+    struct NODE* found = findNode(head, tkns[0]);
+    if (found != NULL) {      
+      int count = 0;
+      while (found->tkns[count] != NULL) {
+	tkns[count] = found->tkns[count];
+	count++;
+      }
+      tkns[count] = NULL;
+    }
     // create new process space
     int res = Process(tkns, NULL); // res = 2 (parent process)
     if (res != 2)
@@ -271,10 +411,7 @@ int InterM() {
  * @result 0: SUCCESS | 1: ERROR
  */
 int BatchM(char* fn) {
-  char buf[MAXLEN]; // store lines in file
-  char* tkns[TOKEN]; // shell command tokens
   FILE* fp;
-
   // file not found
   if ((fp = fopen(fn, "r")) == NULL) {
     char str[255];
@@ -284,15 +421,14 @@ int BatchM(char* fn) {
     Print(str, STDERR_FILENO);    
     return 1;
   }
-
   // read through file contents
   while (!feof(fp)) { // EOF
-    int buf_size = 0;
-    memset(buf, 0x00, MAXLEN); // reset buffer
+    char buf[MAXLEN]; // store lines in file
+    char* tkns[TOKEN]; // shell command tokens
+    int buf_size = 0;    
     if (fgets(buf, MAXLEN, fp) == NULL)      
       break; // Ctrl+D    
     buf_size = strlen(buf) - 1;
-
     // if characters > 512, then skip
     if (buf_size > MAXLINE) {
       char* line = (char*)malloc(sizeof(char) * (MAXLINE + 1)); // +1 for extra null character
@@ -308,17 +444,37 @@ int BatchM(char* fn) {
     char tbuf[MAXLEN]; // trim buffer
     Trim(tbuf, MAXLEN, buf);
     int tbuf_size = strlen(tbuf) - 1;
-
     // new line only (i.e., " \n", "\n", "\t  \n  ")
     if (tbuf_size == 0 && tbuf[tbuf_size] == '\n')
       continue; // N/A
     // exit    
     if (!strcmp("exit", tbuf))
-      break;    
+      break;
     // get tokens from buffer
     if (GetTokens(buf, tkns))
       return 1; // # tokens > TOKEN
+    if (tkns[0] == NULL)
+      continue; // empty string (i.e, "    ")
+    //alias manager
+    int a = strcmp(tkns[0], "alias");
+    if (a == 0 || !strcmp(tkns[0], "unalias")) {
+      if (a == 0)
+    	AliasManager(tkns, 1); // alias
+      else
+    	AliasManager(tkns, 0); // unalias
 
+      continue;
+    }
+    // if alias, then replace tokens
+    struct NODE* found = findNode(head, tkns[0]);
+    if (found != NULL) {
+      int count = 0;
+      while (found->tkns[count] != NULL) {
+    	tkns[count] = found->tkns[count];
+    	count++;
+      }
+      tkns[count] = NULL;
+    }
     // create new process space
     int res = Process(tkns, fp);
     if (res != 2) {
@@ -345,9 +501,9 @@ int main(int argc, char **argv)
   int res = 0; // exit code
   
   // initialize linked list
-  head = malloc(sizeof(struct NODE));
+  head = malloc(sizeof(struct NODE)); // Linked List 
   head->next = NULL;
-
+  
   // keyboard signal event handler
   signal(SIGINT, INThandler);
   
